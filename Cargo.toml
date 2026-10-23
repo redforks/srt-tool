@@ -1,0 +1,10 @@
+[package]
+name = "srt-tool"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "A small command line editor for subtitle files"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }

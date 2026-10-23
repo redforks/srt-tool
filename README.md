@@ -2,29 +2,17 @@
 
 A small command line editor for subtitle files, written in Rust.
 
-`srt-tool` edits subtitle timing and text in place, without a GUI. It reads and
-writes two formats: SubRip (`.srt`) and Advanced SubStation Alpha (`.ass`).
+`srt-tool` edits subtitle timing in place, without a GUI. It reads and writes
+SubRip (`.srt`) files.
 
 ## Status
 
-Early development. The command line interface described below is the target
-design and may still change.
-
-## Features
-
-- Read and write `.srt` files (SubRip).
-- Read and write `.ass` files (Advanced SubStation Alpha, v4+).
-- Convert between `.srt` and `.ass`.
-- Shift every cue by a fixed offset, forward or backward.
-- Scale the timeline, for example to match a different video frame rate.
-- Split a file at a given time, or merge several files into one.
-- Find and replace text across all cues.
-- Fix common problems: overlapping cues, negative start times, empty cues,
-  malformed timestamps.
+Early development. One command exists: `shift`. Every other subtitle operation
+is still unbuilt.
 
 ## Install
 
-Build from source with a stable Rust toolchain (1.75 or newer):
+Build from source with a stable Rust toolchain (1.85 or newer):
 
 ```sh
 git clone https://github.com/redforks/srt-tool.git
@@ -38,106 +26,83 @@ run `cargo install --path .`.
 ## Usage
 
 ```sh
-srt-tool <command> [options] <file>
+srt-tool <command> <file> [arguments]
 ```
-
-`srt-tool` detects the format from the file extension. Use `-f srt` or
-`-f ass` to force a format.
 
 ### Shift time
 
-Move every cue by an offset. Positive values move cues later, negative values
-move them earlier.
+Move every cue by an offset. A positive offset moves cues later, a negative
+offset moves them earlier.
 
 ```sh
-srt-tool shift -o +1.5s movie.srt
-srt-tool shift -o -00:00:02.250 movie.ass
-srt-tool shift -o +250ms --in-place movie.srt
+srt-tool shift movie.srt +1.5s
+srt-tool shift movie.srt -2s --in-place
 ```
 
-### Scale time
+The offset is mandatory and is always signed: it starts with `+` or `-`, then a
+number, then a unit of `ms` or `s`.
 
-Stretch or compress the timeline. The factor is applied to every timestamp.
-To convert subtitles from 23.976 fps to 25 fps, use a factor of `23.976/25`.
+| Offset   | Meaning                        |
+| -------- | ------------------------------ |
+| `+500ms` | 500 milliseconds later         |
+| `-500ms` | 500 milliseconds earlier       |
+| `+2s`    | 2 seconds later                |
+| `-1.5s`  | 1.5 seconds earlier            |
+| `+1500MS`| same as `+1500ms` (units are case-insensitive) |
+
+A timestamp that would fall before `00:00:00,000` is pinned there, and one
+warning line reports how many timestamps were pinned. The command still exits
+with code 0.
 
 ```sh
-srt-tool scale --factor 0.95904 movie.srt
-srt-tool scale --factor 1.04271 --in-place movie.ass
+$ srt-tool shift early.srt -2s
+warning: 1 cue time clamped to 00:00:00,000
 ```
 
-### Convert format
+## Output
+
+By default the result goes to standard output, so you can pipe it:
 
 ```sh
-srt-tool convert --to ass movie.srt      # writes movie.ass
-srt-tool convert --to srt movie.ass      # writes movie.srt
-srt-tool convert --to ass --output sub.ass movie.srt
+srt-tool shift movie.srt +1s > fixed.srt
 ```
 
-### Split and merge
+Pass `--in-place` to rewrite the input file. The original is first copied to
+`FILE.bak`; an existing `FILE.bak` is overwritten. The new contents are written
+to `FILE.srt-tool.tmp` and then renamed over `FILE`, so an interrupted run
+leaves either the old file or the new one.
 
 ```sh
-srt-tool split --at 00:20:00 movie.srt   # writes movie.part1.srt and movie.part2.srt
-srt-tool merge part1.srt part2.srt -o movie.srt
+srt-tool shift movie.srt +1s --in-place
 ```
 
-### Text edit
+Output is canonical, not byte-preserving. Cues are renumbered from 1, timestamps
+are normalized to `HH:MM:SS,mmm`, line endings are `LF`, and the file ends with
+one blank line. Cue text lines, including markup such as `<i>` or `{\an8}`, are
+copied verbatim. See [ADR-0001](docs/adr/0001-canonical-reserialization.md).
 
-```sh
-srt-tool replace --find "teh" --with "the" movie.srt
-srt-tool replace --find "\\N" --with " " --in-place movie.ass
-```
+## Input
 
-### Check and fix
+`.srt` files are parsed strictly. A byte-order mark, CRLF line endings, a
+missing final newline, and extra blank lines between cues are tolerated. A
+non-numeric cue index, a missing `-->`, or a malformed timestamp is an error and
+stops the run; the message names the line number.
 
-```sh
-srt-tool check movie.srt          # report problems, exit code 1 if any found
-srt-tool fix --in-place movie.srt # repair negative times, overlaps, empty cues
-```
-
-## Command reference
-
-| Command   | Purpose                                        |
-| --------- | ---------------------------------------------- |
-| `shift`   | Move all cues by a time offset.                |
-| `scale`   | Multiply all timestamps by a factor.           |
-| `convert` | Convert between `.srt` and `.ass`.             |
-| `split`   | Split one file into two at a given time.       |
-| `merge`   | Join several files into one, sorted by time.   |
-| `replace` | Find and replace text in cue bodies.           |
-| `check`   | Report format and timing problems.             |
-| `fix`     | Repair problems that `check` reports.          |
-
-## Time format
-
-Options that take a time accept these forms:
-
-| Form            | Meaning                          |
-| --------------- | -------------------------------- |
-| `1.5s`          | 1.5 seconds                      |
-| `250ms`         | 250 milliseconds                 |
-| `-2s`           | 2 seconds earlier                |
-| `00:00:02.250`  | hours, minutes, seconds, millis  |
-| `90`            | 90 seconds, plain number         |
-
-## Output behaviour
-
-By default every command writes the result to standard output, so you can pipe
-it. Use `--output FILE` (or `-o FILE`) to write to a file. Use `--in-place` to
-overwrite the input file; the original is kept as `FILE.bak`.
-
-```sh
-srt-tool shift -o +1s movie.srt > fixed.srt
-srt-tool shift -o +1s -o fixed.srt movie.srt
-```
+Cue indices in the input are ignored and regenerated on output.
 
 ## Exit codes
 
-| Code | Meaning                                  |
-| ---- | ---------------------------------------- |
-| `0`  | Success.                                 |
-| `1`  | `check` found problems.                  |
-| `2`  | Bad usage: unknown option or argument.   |
-| `3`  | Input file could not be read or parsed.  |
+| Code | Meaning                                              |
+| ---- | ---------------------------------------------------- |
+| `0`  | Success, including a shift that had to clamp times.  |
+| `2`  | Bad usage: unknown flag, missing argument, bad offset. |
+| `3`  | The file could not be read, parsed, or written.      |
+
+## Commands
+
+| Command | Purpose                            |
+| ------- | ---------------------------------- |
+| `shift` | Move all cues by a time offset.    |
 
 ## License
 
