@@ -109,11 +109,11 @@ Cue indices in a SubRip file are ignored and regenerated on output.
 
 ## Exit codes
 
-| Code | Meaning                                              |
-| ---- | ---------------------------------------------------- |
-| `0`  | Success, including a shift that had to clamp times.  |
-| `2`  | Bad usage: unknown flag, missing argument, bad offset. |
-| `3`  | The file could not be read, parsed, or written, or its extension is not accepted. |
+| Code | Meaning                                                         |
+| ---- | --------------------------------------------------------------- |
+| `0`  | Success, including a shift that had to clamp times.             |
+| `2`  | Bad usage: unknown flag, missing argument, bad offset.          |
+| `3`  | Read, parse, or write failed, or the extension is not accepted. |
 
 ## Commands
 
