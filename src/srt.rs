@@ -260,11 +260,21 @@ impl fmt::Display for Subtitle {
 pub struct ShiftReport {
     /// How many timestamps were pinned at `00:00:00,000`.
     pub clamped_times: usize,
+    /// How many timestamps were rounded to a whole centisecond on writing.
+    ///
+    /// Rounding is a property of the written form, not of the model: an ASS
+    /// timestamp holds centiseconds, while SubRip holds milliseconds, so a
+    /// SubRip shift never rounds and always reports zero here.
+    pub rounded_times: usize,
 }
 
 impl ShiftReport {
     pub fn clamped_any(self) -> bool {
         self.clamped_times > 0
+    }
+
+    pub fn rounded_any(self) -> bool {
+        self.rounded_times > 0
     }
 }
 
@@ -544,6 +554,10 @@ mod tests {
         let report = subtitle.shift(TimeOffset::from_millis(-2_000));
 
         assert_eq!(report.clamped_times, 2);
+        assert_eq!(
+            report.rounded_times, 0,
+            "a SubRip timestamp holds milliseconds exactly, so nothing rounds"
+        );
         assert_eq!(subtitle.cues()[0].start, Timestamp::ZERO);
         assert_eq!(subtitle.cues()[0].end, Timestamp::ZERO);
         assert_eq!(subtitle.cues()[1].start, Timestamp::from_millis(1_000));

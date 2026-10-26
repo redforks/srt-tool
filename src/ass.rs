@@ -152,8 +152,11 @@ impl<'a> AssScript<'a> {
             fields.sort_by_key(|(span, _)| span.start);
             for (span, value) in fields {
                 out.push_str(&self.text[copied..span.start]);
-                let (written, _rounded) = write_timestamp(value.as_millis());
+                // The writer is the only place that knows a centisecond was
+                // lost, so it says so and the report totals it up.
+                let (written, rounded) = write_timestamp(value.as_millis());
                 out.push_str(&written);
+                report.rounded_times += usize::from(rounded);
                 copied = span.end;
             }
         }
@@ -757,6 +760,46 @@ Dialogue: 1,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\\k20}Second";
     fn a_shift_without_clamping_reports_nothing() {
         let (_, report) = parse(FIXTURE).rewrite(TimeOffset::from_millis(1_000));
         assert!(!report.clamped_any());
+    }
+
+    #[test]
+    fn the_report_counts_the_timestamps_whose_written_value_rounds() {
+        let text = "[Events]\n\
+            Format: Layer, Start, End, Style, Text\n\
+            Dialogue: 0,0:00:01.00,0:00:02.50,Default,Hello\n";
+
+        let (_, report) = parse(text).rewrite(TimeOffset::from_millis(505));
+
+        assert_eq!(report.rounded_times, 2, "both timestamps lose 5ms of 505");
+        assert!(report.rounded_any());
+    }
+
+    #[test]
+    fn an_offset_of_whole_centiseconds_rounds_nothing() {
+        let (_, report) = parse(FIXTURE).rewrite(TimeOffset::from_millis(500));
+
+        assert_eq!(report.rounded_times, 0);
+        assert!(!report.rounded_any());
+    }
+
+    #[test]
+    fn a_clamped_timestamp_is_never_counted_as_rounded() {
+        // Rounding is applied to the clamped value, so the timestamp pinned at
+        // zero stays a whole centisecond and only the other one rounds.
+        let text = "[Events]\n\
+            Format: Layer, Start, End, Style, Text\n\
+            Dialogue: 0,0:00:00.50,0:00:05.00,Default,Early\n";
+
+        let (shifted, report) = parse(text).rewrite(TimeOffset::from_millis(-1_995));
+
+        assert_eq!(report.clamped_times, 1);
+        assert_eq!(report.rounded_times, 1);
+        assert_eq!(
+            shifted,
+            "[Events]\n\
+             Format: Layer, Start, End, Style, Text\n\
+             Dialogue: 0,0:00:00.00,0:00:03.01,Default,Early\n"
+        );
     }
 
     #[test]
