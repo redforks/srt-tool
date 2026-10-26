@@ -434,9 +434,13 @@ fn parse_exact_digits(text: &str, width: usize) -> Option<i64> {
 /// time, and counting the timestamps whose written value differs from the shifted
 /// value, belongs here and nowhere else.
 ///
-/// `millis` is the clamped, shifted value, so it is never negative here.
+/// `millis` is the shifted value, and it is never negative: [`Timestamp::shifted`]
+/// pins a timestamp that would fall before zero at [`Timestamp::ZERO`].
 fn write_timestamp(millis: i64) -> (String, bool) {
-    let millis = millis.max(0);
+    debug_assert!(
+        millis >= 0,
+        "write_timestamp is given the clamped value from Timestamp::shifted"
+    );
     let rounded = round_to_centisecond(millis);
     let text = format!(
         "{}:{:02}:{:02}.{:02}",
@@ -448,7 +452,7 @@ fn write_timestamp(millis: i64) -> (String, bool) {
     (text, rounded != millis)
 }
 
-/// Round `millis` to the nearest ten milliseconds.
+/// Round a non-negative `millis` to the nearest ten milliseconds.
 ///
 /// An ASS timestamp holds centiseconds, so this is the width a written timestamp
 /// actually has. A remainder of exactly five milliseconds is a tie and rounds
@@ -456,12 +460,7 @@ fn write_timestamp(millis: i64) -> (String, bool) {
 /// Round).
 fn round_to_centisecond(millis: i64) -> i64 {
     let half = MILLIS_PER_CENTISECOND / 2;
-    if millis < 0 {
-        // Away from zero, which for a negative value means further down.
-        -(millis.saturating_sub(half) / MILLIS_PER_CENTISECOND * MILLIS_PER_CENTISECOND)
-    } else {
-        millis.saturating_add(half) / MILLIS_PER_CENTISECOND * MILLIS_PER_CENTISECOND
-    }
+    millis.saturating_add(half) / MILLIS_PER_CENTISECOND * MILLIS_PER_CENTISECOND
 }
 
 /// A syntax error in an ASS file, located at a 1-based line number.
