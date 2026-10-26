@@ -255,7 +255,7 @@ impl fmt::Display for Subtitle {
     }
 }
 
-/// What a [`Subtitle::shift`] call changed.
+/// What a shift changed, whichever format it was applied to.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ShiftReport {
     /// How many timestamps were pinned at `00:00:00,000`.
