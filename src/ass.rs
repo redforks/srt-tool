@@ -152,7 +152,8 @@ impl<'a> AssScript<'a> {
             fields.sort_by_key(|(span, _)| span.start);
             for (span, value) in fields {
                 out.push_str(&self.text[copied..span.start]);
-                out.push_str(&write_timestamp(value.as_millis()));
+                let (written, _rounded) = write_timestamp(value.as_millis());
+                out.push_str(&written);
                 copied = span.end;
             }
         }
@@ -382,25 +383,42 @@ fn parse_exact_digits(text: &str, width: usize) -> Option<i64> {
     text.parse().ok()
 }
 
-/// Render `millis` as an ASS timestamp, `H:MM:SS.cc`.
+/// Render `millis` as an ASS timestamp, `H:MM:SS.cc`, and say whether rounding
+/// changed the value.
 ///
 /// This is the only place an ASS timestamp is written, and the only place where a
 /// millisecond value meets a field that holds centiseconds: rounding at write
 /// time, and counting the timestamps whose written value differs from the shifted
 /// value, belongs here and nowhere else.
 ///
-/// Until that rounding lands, a remainder below one centisecond is dropped. That
-/// costs nothing today, because a parsed timestamp is always a whole number of
-/// centiseconds, and an offset that is a whole number of centiseconds keeps it so.
-fn write_timestamp(millis: i64) -> String {
+/// `millis` is the clamped, shifted value, so it is never negative here.
+fn write_timestamp(millis: i64) -> (String, bool) {
     let millis = millis.max(0);
-    format!(
+    let rounded = round_to_centisecond(millis);
+    let text = format!(
         "{}:{:02}:{:02}.{:02}",
-        millis / MILLIS_PER_HOUR,
-        (millis / MILLIS_PER_MINUTE) % 60,
-        (millis / MILLIS_PER_SECOND) % 60,
-        (millis % MILLIS_PER_SECOND) / MILLIS_PER_CENTISECOND
-    )
+        rounded / MILLIS_PER_HOUR,
+        (rounded / MILLIS_PER_MINUTE) % 60,
+        (rounded / MILLIS_PER_SECOND) % 60,
+        (rounded % MILLIS_PER_SECOND) / MILLIS_PER_CENTISECOND
+    );
+    (text, rounded != millis)
+}
+
+/// Round `millis` to the nearest ten milliseconds.
+///
+/// An ASS timestamp holds centiseconds, so this is the width a written timestamp
+/// actually has. A remainder of exactly five milliseconds is a tie and rounds
+/// away from zero, so `1235` becomes `1240` and never `1230` (GLOSSARY.md,
+/// Round).
+fn round_to_centisecond(millis: i64) -> i64 {
+    let half = MILLIS_PER_CENTISECOND / 2;
+    if millis < 0 {
+        // Away from zero, which for a negative value means further down.
+        -(millis.saturating_sub(half) / MILLIS_PER_CENTISECOND * MILLIS_PER_CENTISECOND)
+    } else {
+        millis.saturating_add(half) / MILLIS_PER_CENTISECOND * MILLIS_PER_CENTISECOND
+    }
 }
 
 /// A syntax error in an ASS file, located at a 1-based line number.
@@ -875,17 +893,27 @@ Dialogue: 1,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\\k20}Second";
     }
 
     #[test]
-    fn written_timestamps_have_two_fraction_digits() {
-        // The remainder below a centisecond is dropped until rounding lands
-        // (ticket #3 turns that into nearest-centisecond rounding plus a report).
+    fn written_timestamps_round_to_the_nearest_centisecond() {
         let text = "[Events]\n\
             Format: Layer, Start, End, Style, Text\n\
             Dialogue: 0,0:00:01.00,0:00:02.00,Default,Hello\n";
 
-        assert!(rewritten(text, 15).contains("Dialogue: 0,0:00:01.01,0:00:02.01"));
-        assert_eq!(write_timestamp(0), "0:00:00.00");
-        assert_eq!(write_timestamp(3_723_004), "1:02:03.00");
-        assert_eq!(write_timestamp(36_000_000), "10:00:00.00");
+        assert_eq!(
+            rewritten(text, 15),
+            "[Events]\n\
+             Format: Layer, Start, End, Style, Text\n\
+             Dialogue: 0,0:00:01.02,0:00:02.02,Default,Hello\n"
+        );
+        assert_eq!(write_timestamp(0).0, "0:00:00.00");
+        assert_eq!(write_timestamp(3_723_004).0, "1:02:03.00");
+        assert_eq!(write_timestamp(36_000_000).0, "10:00:00.00");
+    }
+
+    #[test]
+    fn a_centisecond_tie_rounds_away_from_zero() {
+        assert_eq!(write_timestamp(1_234).0, "0:00:01.23");
+        assert_eq!(write_timestamp(1_235).0, "0:00:01.24");
+        assert_eq!(write_timestamp(1_236).0, "0:00:01.24");
     }
 
     #[test]
