@@ -363,3 +363,23 @@ fn in_place_on_missing_file_exits_with_code_3() {
 
     assert_eq!(code(&output), 3, "stderr: {}", stderr(&output));
 }
+
+#[test]
+fn unsupported_extension_exits_with_code_3_and_writes_nothing() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.txt", SAMPLE);
+
+    let output = run(&["shift", path_str(&file), "+1s"]);
+
+    assert_eq!(code(&output), 3, "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "", "an unsupported file must write nothing");
+    assert_eq!(
+        stderr(&output),
+        "error: unsupported file extension \".txt\": expected .srt, .ass, or .ssa\n"
+    );
+    assert_eq!(
+        fs::read_to_string(&file).expect("read untouched file"),
+        SAMPLE,
+        "an unsupported file must not be rewritten"
+    );
+}
