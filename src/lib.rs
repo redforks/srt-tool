@@ -9,6 +9,8 @@ pub mod ass;
 pub mod offset;
 pub mod srt;
 
+mod time;
+
 pub use ass::{AssParseError, AssParseErrorKind, AssScript, AssTimestampError, EventField};
 pub use offset::{OffsetError, TimeOffset};
 pub use srt::{Cue, ParseError, ParseErrorKind, ShiftReport, Subtitle, Timestamp, TimestampError};

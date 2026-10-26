@@ -4,10 +4,9 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::offset::TimeOffset;
-
-const MILLIS_PER_SECOND: i64 = 1_000;
-const MILLIS_PER_MINUTE: i64 = 60 * MILLIS_PER_SECOND;
-const MILLIS_PER_HOUR: i64 = 60 * MILLIS_PER_MINUTE;
+use crate::time::{
+    parse_exact_digits, split_hours_minutes, MILLIS_PER_HOUR, MILLIS_PER_MINUTE, MILLIS_PER_SECOND,
+};
 
 /// A point in the subtitle timeline, counted in milliseconds from `00:00:00,000`.
 ///
@@ -86,17 +85,13 @@ impl fmt::Display for TimestampError {
 impl std::error::Error for TimestampError {}
 
 fn parse_timestamp(text: &str) -> Result<Timestamp, TimestampError> {
-    let mut parts = text.split(':');
-    let (hours, minutes, rest) = match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(hours), Some(minutes), Some(rest), None) => (hours, minutes, rest),
-        _ => return Err(TimestampError::Malformed),
-    };
+    let (hours, minutes, rest) = split_hours_minutes(text).ok_or(TimestampError::Malformed)?;
     let (seconds, millis) = rest.split_once(',').ok_or(TimestampError::Malformed)?;
 
-    let hours = parse_fixed_digits(hours, 2).ok_or(TimestampError::Malformed)?;
-    let minutes = parse_fixed_digits(minutes, 2).ok_or(TimestampError::Malformed)?;
-    let seconds = parse_fixed_digits(seconds, 2).ok_or(TimestampError::Malformed)?;
-    let millis = parse_fixed_digits(millis, 3).ok_or(TimestampError::Malformed)?;
+    let hours = parse_exact_digits(hours, 2).ok_or(TimestampError::Malformed)?;
+    let minutes = parse_exact_digits(minutes, 2).ok_or(TimestampError::Malformed)?;
+    let seconds = parse_exact_digits(seconds, 2).ok_or(TimestampError::Malformed)?;
+    let millis = parse_exact_digits(millis, 3).ok_or(TimestampError::Malformed)?;
 
     if minutes > 59 || seconds > 59 {
         return Err(TimestampError::OutOfRange);
@@ -108,14 +103,6 @@ fn parse_timestamp(text: &str) -> Result<Timestamp, TimestampError> {
             + seconds * MILLIS_PER_SECOND
             + millis,
     ))
-}
-
-/// Parse exactly `width` ASCII digits.
-fn parse_fixed_digits(text: &str, width: usize) -> Option<i64> {
-    if text.len() != width || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    text.parse().ok()
 }
 
 /// One subtitle block: a start and end timestamp plus one or more text lines.

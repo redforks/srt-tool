@@ -18,10 +18,10 @@ use std::ops::Range;
 
 use crate::offset::TimeOffset;
 use crate::srt::{ShiftReport, Timestamp};
+use crate::time::{
+    parse_exact_digits, split_hours_minutes, MILLIS_PER_HOUR, MILLIS_PER_MINUTE, MILLIS_PER_SECOND,
+};
 
-const MILLIS_PER_SECOND: i64 = 1_000;
-const MILLIS_PER_MINUTE: i64 = 60 * MILLIS_PER_SECOND;
-const MILLIS_PER_HOUR: i64 = 60 * MILLIS_PER_MINUTE;
 const MILLIS_PER_CENTISECOND: i64 = 10;
 
 /// The section an event line lives in, compared case-insensitively.
@@ -387,11 +387,7 @@ fn field_spans(payload: &str, format: &EventFormat) -> Vec<Range<usize>> {
 /// minutes, seconds, and centiseconds are exactly two digits each. A centisecond
 /// is ten milliseconds.
 fn parse_timestamp(text: &str) -> Result<Timestamp, AssTimestampError> {
-    let mut parts = text.split(':');
-    let (hours, minutes, rest) = match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(hours), Some(minutes), Some(rest), None) => (hours, minutes, rest),
-        _ => return Err(AssTimestampError::Malformed),
-    };
+    let (hours, minutes, rest) = split_hours_minutes(text).ok_or(AssTimestampError::Malformed)?;
     let (seconds, centiseconds) = rest.split_once('.').ok_or(AssTimestampError::Malformed)?;
 
     if hours.is_empty() || !hours.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -416,14 +412,6 @@ fn parse_timestamp(text: &str) -> Result<Timestamp, AssTimestampError> {
         .and_then(|total| total.checked_add(rest))
         .ok_or(AssTimestampError::OutOfRange)?;
     Ok(Timestamp::from_millis(millis))
-}
-
-/// Parse exactly `width` ASCII digits.
-fn parse_exact_digits(text: &str, width: usize) -> Option<i64> {
-    if text.len() != width || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    text.parse().ok()
 }
 
 /// Render `millis` as an ASS timestamp, `H:MM:SS.cc`, and say whether rounding
