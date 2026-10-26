@@ -76,10 +76,26 @@ leaves either the old file or the new one.
 srt-tool shift movie.srt +1s --in-place
 ```
 
-Output is canonical, not byte-preserving. Cues are renumbered from 1, timestamps
-are normalized to `HH:MM:SS,mmm`, line endings are `LF`, and the file ends with
-one blank line. Cue text lines, including markup such as `<i>` or `{\an8}`, are
-copied verbatim. See [ADR-0001](docs/adr/0001-canonical-reserialization.md).
+What the output looks like depends on the format. `shift` only moves time, and
+the two formats record time differently.
+
+| Format         | How the output is written                                                    |
+| -------------- | ---------------------------------------------------------------------------- |
+| `.srt`         | Canonical: cues renumbered, timestamps normalized, `LF` ([ADR-0001](docs/adr/0001-canonical-reserialization.md)) |
+| `.ass`, `.ssa` | Preserving rewrite: only the two timestamps change ([ADR-0002](docs/adr/0002-preserving-rewrite-for-ass.md)) |
+
+SubRip output is canonical, not byte-preserving. Cues are renumbered from 1,
+timestamps are normalized to `HH:MM:SS,mmm`, line endings are `LF`, and the file
+ends with one blank line. Cue text lines, including markup such as `<i>` or
+`{\an8}`, are copied verbatim.
+
+Advanced SubStation Alpha output is a preserving rewrite: only the `Start` and
+`End` fields of each `Dialogue:` line are replaced, and every other byte is
+copied unchanged. The byte-order mark, CRLF line endings, section order,
+`[V4+ Styles]`, font sections, `;` comments, trailing whitespace, override tags
+such as `{\an8}`, and whether the file ends with a newline all survive. Nothing
+is renumbered because ASS events have no index. `Comment:` lines are not cues
+and do not move.
 
 ## Input
 
@@ -106,6 +122,13 @@ non-numeric cue index, a missing `-->`, or a malformed timestamp is an error and
 stops the run; the message names the line number.
 
 Cue indices in a SubRip file are ignored and regenerated on output.
+
+`.ass` and `.ssa` files are parsed strictly too. Only the first `[Events]`
+section is read, and only its `Dialogue:` lines. The `Format:` line there
+declares the field order, and the `Start` and `End` positions are read from it,
+never assumed. A section without a usable `Format:` line, or an event line with
+fewer fields than it declares, stops the run and the message names the line
+number.
 
 ## Exit codes
 
