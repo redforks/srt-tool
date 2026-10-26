@@ -148,6 +148,11 @@ fn shift(file: &Path, offset: TimeOffset, in_place: bool) -> Result<(), String> 
     }
 
     if report.clamped_any() {
+        // The SubRip form is deliberate even for an `.ass` file: ticket #2 fixes
+        // this exact wording ("the same `warning: N cue time clamped to
+        // 00:00:00,000` line on stderr and exit code 0"), so the ticket wins over
+        // GLOSSARY.md's note that a timestamp's written form depends on the
+        // format. Change the ticket before changing this line.
         warn(
             report.clamped_times,
             "cue time",
