@@ -14,3 +14,8 @@ content, which makes tests exact and makes a second run of the same command a
 no-op. The trade-off was accepted knowingly: byte-preserving edits would need a
 lossless document model, and that buys nothing until a command edits text rather
 than time.
+
+This decision covers SubRip only. See
+[ADR-0002](0002-preserving-rewrite-for-ass.md): an ASS file is written by a
+preserving rewrite instead, because it holds styles and sections that a
+canonical writer would destroy.
