@@ -3,7 +3,7 @@
 A small command line editor for subtitle files, written in Rust.
 
 `srt-tool` edits subtitle timing in place, without a GUI. It reads and writes
-SubRip (`.srt`) files.
+SubRip (`.srt`) and Advanced SubStation Alpha (`.ass`, `.ssa`) files.
 
 ## Status
 
@@ -83,12 +83,29 @@ copied verbatim. See [ADR-0001](docs/adr/0001-canonical-reserialization.md).
 
 ## Input
 
+The file extension selects the format. It is compared case-insensitively, so
+`movie.SRT` is read exactly like `movie.srt`.
+
+| Extension      | Format                    |
+| -------------- | ------------------------- |
+| `.srt`         | SubRip                    |
+| `.ass`, `.ssa` | Advanced SubStation Alpha |
+
+The extension is the only signal: the content is never inspected to guess a
+format. Any other extension, or no extension, stops the run with exit code 3
+before the file is read, so nothing is written.
+
+```sh
+$ srt-tool shift movie.txt +1s
+error: unsupported file extension ".txt": expected .srt, .ass, or .ssa
+```
+
 `.srt` files are parsed strictly. A byte-order mark, CRLF line endings, a
 missing final newline, and extra blank lines between cues are tolerated. A
 non-numeric cue index, a missing `-->`, or a malformed timestamp is an error and
 stops the run; the message names the line number.
 
-Cue indices in the input are ignored and regenerated on output.
+Cue indices in a SubRip file are ignored and regenerated on output.
 
 ## Exit codes
 
@@ -96,7 +113,7 @@ Cue indices in the input are ignored and regenerated on output.
 | ---- | ---------------------------------------------------- |
 | `0`  | Success, including a shift that had to clamp times.  |
 | `2`  | Bad usage: unknown flag, missing argument, bad offset. |
-| `3`  | The file could not be read, parsed, or written.      |
+| `3`  | The file could not be read, parsed, or written, or its extension is not accepted. |
 
 ## Commands
 
