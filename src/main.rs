@@ -80,13 +80,14 @@ impl SubtitleFormat {
                 "missing file extension: expected {ACCEPTED_EXTENSIONS}"
             ));
         };
-        let extension = extension.to_string_lossy();
+        // `Path::extension` drops the dot; keep it, so the extension is both
+        // matched and reported in the form the user wrote it.
+        let extension = format!(".{}", extension.to_string_lossy());
         match extension.to_ascii_lowercase().as_str() {
-            "srt" => Ok(Self::SubRip),
-            "ass" | "ssa" => Ok(Self::AdvancedSubStationAlpha),
+            ".srt" => Ok(Self::SubRip),
+            ".ass" | ".ssa" => Ok(Self::AdvancedSubStationAlpha),
             _ => Err(format!(
-                "unsupported file extension {:?}: expected {ACCEPTED_EXTENSIONS}",
-                format!(".{extension}")
+                "unsupported file extension {extension:?}: expected {ACCEPTED_EXTENSIONS}"
             )),
         }
     }
