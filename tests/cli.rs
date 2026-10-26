@@ -372,7 +372,11 @@ fn unsupported_extension_exits_with_code_3_and_writes_nothing() {
     let output = run(&["shift", path_str(&file), "+1s"]);
 
     assert_eq!(code(&output), 3, "stderr: {}", stderr(&output));
-    assert_eq!(stdout(&output), "", "an unsupported file must write nothing");
+    assert_eq!(
+        stdout(&output),
+        "",
+        "an unsupported file must write nothing"
+    );
     assert_eq!(
         stderr(&output),
         "error: unsupported file extension \".txt\": expected .srt, .ass, or .ssa\n"
@@ -382,4 +386,92 @@ fn unsupported_extension_exits_with_code_3_and_writes_nothing() {
         SAMPLE,
         "an unsupported file must not be rewritten"
     );
+}
+
+#[test]
+fn uppercase_extension_reads_the_same_as_lowercase() {
+    let dir = TempDir::new();
+    let lower = dir.write("movie.srt", SAMPLE);
+    let upper = dir.write("movie.SRT", SAMPLE);
+
+    let lower_output = run(&["shift", path_str(&lower), "+1s"]);
+    let upper_output = run(&["shift", path_str(&upper), "+1s"]);
+
+    assert_eq!(code(&upper_output), 0, "stderr: {}", stderr(&upper_output));
+    assert_eq!(stdout(&upper_output), stdout(&lower_output));
+    assert_eq!(stderr(&upper_output), "");
+    assert!(
+        stdout(&upper_output).contains("00:00:02,000 --> 00:00:03,500"),
+        "{}",
+        stdout(&upper_output)
+    );
+}
+
+#[test]
+fn missing_extension_exits_with_code_3_and_names_the_accepted_ones() {
+    let dir = TempDir::new();
+    let file = dir.write("movie", SAMPLE);
+
+    let output = run(&["shift", path_str(&file), "+1s"]);
+
+    assert_eq!(code(&output), 3, "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: missing file extension: expected .srt, .ass, or .ssa\n"
+    );
+}
+
+#[test]
+fn ass_and_ssa_extensions_select_the_ass_format_not_subrip() {
+    let dir = TempDir::new();
+    let text = "[Script Info]\nTitle: sample\n\n[Events]\n\
+        Format: Layer, Start, End, Style, Text\n\
+        Dialogue: 0,0:00:01.00,0:00:02.50,Default,Hello\n";
+
+    for name in ["movie.ass", "movie.ssa", "movie.ASS"] {
+        let file = dir.write(name, text);
+
+        let output = run(&["shift", path_str(&file), "+1s"]);
+
+        assert_eq!(code(&output), 3, "{name}: stderr: {}", stderr(&output));
+        assert_eq!(stdout(&output), "", "{name}");
+        let message = stderr(&output);
+        assert!(
+            message.contains("Advanced SubStation Alpha"),
+            "{name}: {message}"
+        );
+        assert!(!message.contains("cue index"), "{name}: {message}");
+    }
+}
+
+#[test]
+fn in_place_keeps_the_input_extension_in_the_backup_name() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.SRT", SAMPLE);
+    let backup = dir.path.join("movie.SRT.bak");
+
+    let output = run(&["shift", path_str(&file), "+1s", "--in-place"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(fs::read_to_string(&backup).expect("read backup"), SAMPLE);
+    let rewritten = fs::read_to_string(&file).expect("read rewritten file");
+    assert!(
+        rewritten.contains("00:00:02,000 --> 00:00:03,500"),
+        "{rewritten}"
+    );
+}
+
+#[test]
+fn in_place_on_an_unsupported_extension_writes_no_backup() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.txt", SAMPLE);
+
+    let output = run(&["shift", path_str(&file), "+1s", "--in-place"]);
+
+    assert_eq!(code(&output), 3, "stderr: {}", stderr(&output));
+    assert!(!dir.path.join("movie.txt.bak").exists());
+    assert!(!dir.path.join("movie.txt.srt-tool.tmp").exists());
+    assert_eq!(fs::read_to_string(&file).expect("read file"), SAMPLE);
 }
