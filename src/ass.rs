@@ -198,6 +198,9 @@ struct EventFormat {
     start: usize,
     /// Field position of the `End` timestamp.
     end: usize,
+    /// Field position of `Text`, the one field that may hold commas itself.
+    /// `None` when the `Format:` line does not declare it.
+    text: Option<usize>,
 }
 
 /// One line of the source, with the byte offset of its first character.
@@ -275,6 +278,7 @@ fn parse_format_line(
             field_count: names.len(),
             start,
             end,
+            text: position("Text"),
         }),
         _ => Err(AssParseError {
             line: line.number,
@@ -299,7 +303,7 @@ fn parse_event(
     let payload_text = payload.trim_start();
     let payload_start = line.start + leading + key_end + (payload.len() - payload_text.len());
 
-    let spans = field_spans(payload_text, format.field_count);
+    let spans = field_spans(payload_text, format);
     if spans.len() < format.field_count {
         return Err(AssParseError {
             line: line.number,
@@ -337,15 +341,39 @@ fn parse_event(
 
 /// The byte spans of the comma-separated fields of `payload`, relative to it.
 ///
-/// At most `count` fields are returned: the last one keeps any commas it holds,
-/// because the `Text` field of an event may itself contain commas.
-fn field_spans(payload: &str, count: usize) -> Vec<Range<usize>> {
-    let mut spans = Vec::with_capacity(count);
-    let mut start = 0;
-    for (index, (comma, _)) in payload.match_indices(',').enumerate() {
-        if index + 1 >= count {
-            break;
+/// At most `format.field_count` fields are returned. Only the `Text` field may
+/// hold commas itself: it keeps the commas left over between the fields before
+/// it and the fields after it, and the fields after it are therefore counted
+/// from the end of the line. When `Text` is the last field (the usual order) or
+/// is not declared, that is the same as letting the last field keep the rest. A
+/// line with too few commas yields too few spans, which the caller reports as a
+/// field-count error.
+fn field_spans(payload: &str, format: &EventFormat) -> Vec<Range<usize>> {
+    let commas: Vec<usize> = payload.match_indices(',').map(|(comma, _)| comma).collect();
+
+    let separators: Vec<usize> = match format.text {
+        Some(text) if text + 1 < format.field_count => {
+            let tail = format.field_count - text - 1;
+            if commas.len() >= text + tail {
+                commas[..text]
+                    .iter()
+                    .chain(&commas[commas.len() - tail..])
+                    .copied()
+                    .collect()
+            } else {
+                commas
+            }
         }
+        _ => commas
+            .iter()
+            .take(format.field_count.saturating_sub(1))
+            .copied()
+            .collect(),
+    };
+
+    let mut spans = Vec::with_capacity(separators.len() + 1);
+    let mut start = 0;
+    for comma in separators {
         spans.push(start..comma);
         start = comma + 1;
     }
@@ -694,6 +722,22 @@ Dialogue: 1,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\\k20}Second";
     }
 
     #[test]
+    fn keeps_commas_inside_a_text_field_that_is_not_last() {
+        // `Text` holds commas, and the fields declared after it are counted from
+        // the end of the line, so the timestamps stay where `Format:` put them.
+        let text = "[Events]\n\
+            Format: Layer, Text, Start, End, Style\n\
+            Dialogue: 0,Hello, world,0:00:01.00,0:00:02.00,Default\n";
+
+        assert_eq!(
+            rewritten(text, 1_000),
+            "[Events]\n\
+             Format: Layer, Text, Start, End, Style\n\
+             Dialogue: 0,Hello, world,0:00:02.00,0:00:03.00,Default\n"
+        );
+    }
+
+    #[test]
     fn comment_lines_do_not_move() {
         let text = "[Events]\n\
             Format: Layer, Start, End, Style, Text\n\
@@ -991,8 +1035,18 @@ Dialogue: 1,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\\k20}Second";
 
     #[test]
     fn field_spans_stop_at_the_declared_field_count() {
-        assert_eq!(field_spans("a,b,c,d", 3), vec![0..1, 2..3, 4..7]);
-        assert_eq!(field_spans("a,b", 5), vec![0..1, 2..3]);
-        assert_eq!(field_spans("solo", 1), vec![0..4]);
+        let format = |field_count, text| EventFormat {
+            field_count,
+            start: 0,
+            end: 0,
+            text,
+        };
+
+        assert_eq!(
+            field_spans("a,b,c,d", &format(3, Some(2))),
+            vec![0..1, 2..3, 4..7]
+        );
+        assert_eq!(field_spans("a,b", &format(5, Some(4))), vec![0..1, 2..3]);
+        assert_eq!(field_spans("solo", &format(1, Some(0))), vec![0..4]);
     }
 }
