@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use srt_tool::{ShiftReport, Subtitle, TimeOffset};
+use srt_tool::{AssScript, ShiftReport, Subtitle, TimeOffset};
 
 /// Exit code for a file that cannot be read, parsed, or written, or whose
 /// extension names no format this tool knows.
@@ -121,10 +121,15 @@ fn shift(file: &Path, offset: TimeOffset, in_place: bool) -> Result<(), String> 
 
     let original =
         fs::read(file).map_err(|error| format!("cannot read {}: {error}", file.display()))?;
-    let text = std::str::from_utf8(&original).map_err(|_| {
+    // UTF-8 is the only accepted encoding, for both formats, and decoding happens
+    // here rather than in a parser: the binary already holds the bytes (it keeps
+    // them for the backup), one decode then serves every format, and neither
+    // parser can silently transcode what it cannot read.
+    let text = std::str::from_utf8(&original).map_err(|error| {
         format!(
-            "cannot read {}: the file is not valid UTF-8",
-            file.display()
+            "cannot read {}: the file is not valid UTF-8 (invalid byte at offset {})",
+            file.display(),
+            error.valid_up_to()
         )
     })?;
 
@@ -154,7 +159,9 @@ fn shift(file: &Path, offset: TimeOffset, in_place: bool) -> Result<(), String> 
 /// Parse `text` as `format`, shift it, and render the result.
 ///
 /// The shifted text and the report that describes the shift come back as a
-/// pair: the caller writes the text, then reports on it.
+/// pair: the caller writes the text, then reports on it. The two formats render
+/// differently on purpose: SubRip is re-serialized canonically (ADR-0001) and ASS
+/// is rewritten in place (ADR-0002).
 fn shift_text(
     format: SubtitleFormat,
     text: &str,
@@ -167,7 +174,8 @@ fn shift_text(
             Ok((subtitle.to_canonical_string(), report))
         }
         SubtitleFormat::AdvancedSubStationAlpha => {
-            Err("Advanced SubStation Alpha files are not supported yet".to_string())
+            let script = AssScript::parse(text).map_err(|error| error.to_string())?;
+            Ok(script.rewrite(offset))
         }
     }
 }

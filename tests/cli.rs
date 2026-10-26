@@ -19,6 +19,56 @@ second cue line 2\n\
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
+/// A minimal script whose `[Events]` `Format:` line has the usual field order.
+const ASS_SAMPLE: &str = "[Script Info]\n\
+Title: sample\n\
+\n\
+[Events]\n\
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+Dialogue: 0,0:00:01.00,0:00:02.50,Default,,0,0,0,,Hello\n";
+
+/// [`ASS_SAMPLE`] after `+1s`.
+const ASS_SAMPLE_ONE_SECOND_LATER: &str = "[Script Info]\n\
+Title: sample\n\
+\n\
+[Events]\n\
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+Dialogue: 0,0:00:02.00,0:00:03.50,Default,,0,0,0,,Hello\n";
+
+/// A script with everything a preserving rewrite must not disturb: a byte-order
+/// mark, CRLF line endings, a `;` comment, styles, a `Comment:` event, override
+/// tags, trailing whitespace on a cue, and no final newline.
+const ASS_RICH: &str = "\u{feff}[Script Info]\r\n\
+; a comment the tool must keep\r\n\
+Title: Sample\r\n\
+ScriptType: v4.00+\r\n\
+\r\n\
+[V4+ Styles]\r\n\
+Format: Name, Fontname, Fontsize, PrimaryColour\r\n\
+Style: Default,Arial,20,&H00FFFFFF\r\n\
+\r\n\
+[Events]\r\n\
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n\
+Comment: 0,0:00:09.00,0:00:10.00,Default,,0,0,0,,Static note\r\n\
+Dialogue: 0,0:00:01.00,0:00:02.50,Default,,0,0,0,,{\\an8}Top line   \r\n\
+Dialogue: 1,0:00:03.00,0:00:04.00,Default,,0,0,0,,{\\k20}Second";
+
+/// [`ASS_RICH`] after `+1s`.
+const ASS_RICH_ONE_SECOND_LATER: &str = "\u{feff}[Script Info]\r\n\
+; a comment the tool must keep\r\n\
+Title: Sample\r\n\
+ScriptType: v4.00+\r\n\
+\r\n\
+[V4+ Styles]\r\n\
+Format: Name, Fontname, Fontsize, PrimaryColour\r\n\
+Style: Default,Arial,20,&H00FFFFFF\r\n\
+\r\n\
+[Events]\r\n\
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n\
+Comment: 0,0:00:09.00,0:00:10.00,Default,,0,0,0,,Static note\r\n\
+Dialogue: 0,0:00:02.00,0:00:03.50,Default,,0,0,0,,{\\an8}Top line   \r\n\
+Dialogue: 1,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\\k20}Second";
+
 /// A temporary directory, removed when it goes out of scope.
 struct TempDir {
     path: PathBuf,
@@ -35,8 +85,13 @@ impl TempDir {
 
     /// Write `contents` to `name` inside the temporary directory, return the path.
     fn write(&self, name: &str, contents: &str) -> PathBuf {
+        self.write_bytes(name, contents.as_bytes())
+    }
+
+    /// Write raw `bytes` to `name` inside the temporary directory, return the path.
+    fn write_bytes(&self, name: &str, bytes: &[u8]) -> PathBuf {
         let path = self.path.join(name);
-        fs::write(&path, contents).expect("write temp file");
+        fs::write(&path, bytes).expect("write temp file");
         path
     }
 }
@@ -423,26 +478,194 @@ fn missing_extension_exits_with_code_3_and_names_the_accepted_ones() {
 }
 
 #[test]
-fn ass_and_ssa_extensions_select_the_ass_format_not_subrip() {
+fn ass_and_ssa_extensions_select_the_ass_format() {
     let dir = TempDir::new();
-    let text = "[Script Info]\nTitle: sample\n\n[Events]\n\
-        Format: Layer, Start, End, Style, Text\n\
-        Dialogue: 0,0:00:01.00,0:00:02.50,Default,Hello\n";
 
     for name in ["movie.ass", "movie.ssa", "movie.ASS"] {
-        let file = dir.write(name, text);
+        let file = dir.write(name, ASS_SAMPLE);
 
         let output = run(&["shift", path_str(&file), "+1s"]);
 
-        assert_eq!(code(&output), 3, "{name}: stderr: {}", stderr(&output));
-        assert_eq!(stdout(&output), "", "{name}");
-        let message = stderr(&output);
-        assert!(
-            message.contains("Advanced SubStation Alpha"),
-            "{name}: {message}"
-        );
-        assert!(!message.contains("cue index"), "{name}: {message}");
+        assert_eq!(code(&output), 0, "{name}: stderr: {}", stderr(&output));
+        assert_eq!(stdout(&output), ASS_SAMPLE_ONE_SECOND_LATER, "{name}");
+        assert_eq!(stderr(&output), "", "{name}");
     }
+}
+
+#[test]
+fn ass_zero_offset_is_byte_identical() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.ass", ASS_RICH);
+
+    let output = run(&["shift", path_str(&file), "+0ms"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert_eq!(
+        output.stdout,
+        ASS_RICH.as_bytes(),
+        "a zero shift must return the input bytes"
+    );
+    assert_eq!(stderr(&output), "");
+}
+
+#[test]
+fn ass_shift_moves_only_the_timings() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.ass", ASS_RICH);
+
+    let output = run(&["shift", path_str(&file), "+1s"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        ASS_RICH_ONE_SECOND_LATER,
+        "only Start and End may change"
+    );
+    assert_eq!(stderr(&output), "");
+}
+
+#[test]
+fn ass_comment_lines_styles_and_override_tags_do_not_move() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.ass", ASS_RICH);
+
+    let output = run(&["shift", path_str(&file), "-2s"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(
+        out.contains("Comment: 0,0:00:09.00,0:00:10.00,Default,,0,0,0,,Static note"),
+        "a Comment: line is not a cue: {out}"
+    );
+    assert!(
+        out.contains("Style: Default,Arial,20,&H00FFFFFF"),
+        "a style must survive: {out}"
+    );
+    assert!(
+        out.contains("{\\an8}Top line"),
+        "override tags must survive: {out}"
+    );
+    assert!(out.contains("{\\k20}Second"), "{out}");
+    assert!(
+        out.contains("Dialogue: 0,0:00:00.00,0:00:00.50,Default,,0,0,0,,{\\an8}Top line"),
+        "timings move: {out}"
+    );
+}
+
+#[test]
+fn ass_clamping_reports_the_same_warning_and_exit_code() {
+    let dir = TempDir::new();
+    let file = dir.write(
+        "early.ass",
+        "[Events]\nFormat: Layer, Start, End, Style, Text\n\
+         Dialogue: 0,0:00:00.50,0:00:01.00,Default,Early\n",
+    );
+
+    let output = run(&["shift", path_str(&file), "-2s"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("Dialogue: 0,0:00:00.00,0:00:00.00,Default,Early"),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(
+        stderr(&output),
+        "warning: 2 cue times clamped to 00:00:00,000\n"
+    );
+}
+
+#[test]
+fn ass_missing_format_line_exits_with_code_3_and_names_the_line() {
+    let dir = TempDir::new();
+    let file = dir.write(
+        "broken.ass",
+        "[Script Info]\nTitle: Broken\n\n[Events]\n\
+         Dialogue: 0,0:00:01.00,0:00:02.00,Default,Hello\n",
+    );
+
+    let output = run(&["shift", path_str(&file), "+1s"]);
+
+    assert_eq!(code(&output), 3, "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    let message = stderr(&output);
+    assert!(message.contains("cannot parse"), "{message}");
+    assert!(message.contains("line 5"), "{message}");
+    assert!(message.contains("Format: line"), "{message}");
+}
+
+#[test]
+fn ass_event_with_too_few_fields_exits_with_code_3_and_names_the_line() {
+    let dir = TempDir::new();
+    let file = dir.write(
+        "broken.ass",
+        "[Events]\nFormat: Layer, Start, End, Style, Text\n\
+         Dialogue: 0,0:00:01.00,Default\n",
+    );
+
+    let output = run(&["shift", path_str(&file), "+1s"]);
+
+    assert_eq!(code(&output), 3, "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "error: cannot parse {}: line 3: expected 5 fields in the event line, found 3\n",
+            file.display()
+        )
+    );
+}
+
+#[test]
+fn ass_in_place_keeps_the_bytes_and_the_backup() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.ass", ASS_RICH);
+    let backup = dir.path.join("movie.ass.bak");
+
+    let output = run(&["shift", path_str(&file), "+1s", "--in-place"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    let rewritten = fs::read(&file).expect("read rewritten file");
+    assert_eq!(rewritten, ASS_RICH_ONE_SECOND_LATER.as_bytes());
+    assert_eq!(
+        fs::read(&backup).expect("read backup"),
+        ASS_RICH.as_bytes(),
+        "the backup holds the original bytes, BOM and CRLF included"
+    );
+}
+
+#[test]
+fn ass_file_without_an_events_section_is_unchanged() {
+    let dir = TempDir::new();
+    let text = "[Script Info]\nTitle: No events\n";
+    let file = dir.write("empty.ass", text);
+
+    let output = run(&["shift", path_str(&file), "+5s"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), text);
+}
+
+#[test]
+fn non_utf8_input_exits_with_code_3_and_is_not_transcoded() {
+    let dir = TempDir::new();
+    // A lone 0xE9 is Latin-1, not UTF-8, and must not be guessed at.
+    let bytes: &[u8] = b"[Events]\nFormat: Layer, Start, End, Style, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,\xe9\n";
+    let file = dir.write_bytes("latin1.ass", bytes);
+
+    let output = run(&["shift", path_str(&file), "+1s", "--in-place"]);
+
+    assert_eq!(code(&output), 3, "stderr: {}", stderr(&output));
+    assert_eq!(stdout(&output), "");
+    let message = stderr(&output);
+    assert!(message.contains("not valid UTF-8"), "{message}");
+    assert!(!dir.path.join("latin1.ass.bak").exists());
+    assert_eq!(
+        fs::read(&file).expect("read untouched file"),
+        bytes,
+        "a file that cannot be decoded must not be rewritten"
+    );
 }
 
 #[test]
