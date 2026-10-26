@@ -59,6 +59,26 @@ $ srt-tool shift early.srt -2s
 warning: 1 cue time clamped to 00:00:00,000
 ```
 
+An ASS timestamp holds centiseconds, so a shift that lands between two of them
+is rounded to the nearest one, with a tie going up: `+505ms` moves every
+timestamp by `510ms`. One warning line reports how many timestamps were
+rounded. The command still exits with code 0.
+
+```sh
+$ srt-tool shift movie.ass +505ms
+warning: 2 timestamps rounded to 10ms
+```
+
+Rounding is applied after clamping, so a timestamp pinned at zero is never
+reported as rounded, and SubRip is never rounded at all: its timestamps hold
+milliseconds. Both warnings can appear in one run, clamping first.
+
+```sh
+$ srt-tool shift early.ass -1995ms
+warning: 1 cue time clamped to 00:00:00,000
+warning: 1 timestamp rounded to 10ms
+```
+
 ## Output
 
 By default the result goes to standard output, so you can pipe it:
@@ -134,7 +154,7 @@ number.
 
 | Code | Meaning                                                         |
 | ---- | --------------------------------------------------------------- |
-| `0`  | Success, including a shift that had to clamp times.             |
+| `0`  | Success, including a shift that had to clamp or round times.    |
 | `2`  | Bad usage: unknown flag, missing argument, bad offset.          |
 | `3`  | Read, parse, or write failed, or the extension is not accepted. |
 
