@@ -147,16 +147,28 @@ impl<'a> AssScript<'a> {
             report.clamped_times += usize::from(start_clamped) + usize::from(end_clamped);
 
             // The fields are spliced in file order, whatever order the `Format:`
-            // line declared.
-            let mut fields = [(&event.start_span, start), (&event.end_span, end)];
-            fields.sort_by_key(|(span, _)| span.start);
-            for (span, value) in fields {
+            // line declared. Each field carries its parsed value alongside the
+            // shifted one, so an unchanged value can keep its source bytes.
+            let mut fields = [
+                (&event.start_span, event.start, start),
+                (&event.end_span, event.end, end),
+            ];
+            fields.sort_by_key(|(span, _, _)| span.start);
+            for (span, parsed, value) in fields {
                 out.push_str(&self.text[copied..span.start]);
-                // The writer is the only place that knows a centisecond was
-                // lost, so it says so and the report totals it up.
-                let (written, rounded) = write_timestamp(value.as_millis());
-                out.push_str(&written);
-                report.rounded_times += usize::from(rounded);
+                if value == parsed {
+                    // The value did not move, so its written form did not either:
+                    // copy the bytes the author wrote instead of re-rendering
+                    // them, and count nothing as rounded. Hours padded to two
+                    // digits, for example, are a spelling this honest rule keeps.
+                    out.push_str(&self.text[span.clone()]);
+                } else {
+                    // The writer is the only place that knows a centisecond was
+                    // lost, so it says so and the report totals it up.
+                    let (written, rounded) = write_timestamp(value.as_millis());
+                    out.push_str(&written);
+                    report.rounded_times += usize::from(rounded);
+                }
                 copied = span.end;
             }
         }
@@ -586,6 +598,24 @@ Dialogue: 1,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\\k20}Second";
     #[test]
     fn zero_offset_is_byte_identical() {
         assert_eq!(rewritten(FIXTURE, 0), FIXTURE);
+    }
+
+    #[test]
+    fn a_zero_offset_keeps_the_written_form_of_each_timestamp() {
+        // The writer's own form has no zero-padded hours. A timestamp whose value
+        // does not change must not be re-rendered, so these bytes survive as the
+        // author wrote them.
+        let text = "[Events]\n\
+            Format: Layer, Start, End, Style, Text\n\
+            Dialogue: 0,00:00:01.00,00:00:02.50,Default,Hello\n";
+
+        assert_eq!(rewritten(text, 0), text);
+        assert_eq!(
+            rewritten(text, 500),
+            "[Events]\n\
+             Format: Layer, Start, End, Style, Text\n\
+             Dialogue: 0,0:00:01.50,0:00:03.00,Default,Hello\n"
+        );
     }
 
     #[test]
