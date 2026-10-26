@@ -44,7 +44,8 @@ _Avoid_: Truncate, floor, cap
 
 **Round**:
 To move a timestamp to the nearest ten milliseconds, because an ASS timestamp
-can only express centiseconds.
+can only express centiseconds. A tie, exactly five milliseconds above a
+centisecond, goes away from zero.
 _Avoid_: Truncate, floor, snap
 
 **Canonical output**:
