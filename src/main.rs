@@ -148,12 +148,35 @@ fn shift(file: &Path, offset: TimeOffset, in_place: bool) -> Result<(), String> 
     }
 
     if report.clamped_any() {
-        let times = report.clamped_times;
-        let noun = if times == 1 { "time" } else { "times" };
-        eprintln!("warning: {times} cue {noun} clamped to 00:00:00,000");
+        warn(
+            report.clamped_times,
+            "cue time",
+            "cue times",
+            "clamped to 00:00:00,000",
+        );
+    }
+
+    // Rounding is reported after clamping because it is applied to the clamped
+    // value: the two lines read in the order the two things happened.
+    if report.rounded_any() {
+        warn(
+            report.rounded_times,
+            "timestamp",
+            "timestamps",
+            "rounded to 10ms",
+        );
     }
 
     Ok(())
+}
+
+/// Print one aggregate warning line on stderr.
+///
+/// A warning is never the reason a command fails: it describes a shift that was
+/// carried out exactly as far as the format allows, so the exit code stays 0.
+fn warn(count: usize, singular: &str, plural: &str, what: &str) {
+    let noun = if count == 1 { singular } else { plural };
+    eprintln!("warning: {count} {noun} {what}");
 }
 
 /// Parse `text` as `format`, shift it, and render the result.

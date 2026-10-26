@@ -698,3 +698,76 @@ fn in_place_on_an_unsupported_extension_writes_no_backup() {
     assert!(!dir.path.join("movie.txt.srt-tool.tmp").exists());
     assert_eq!(fs::read_to_string(&file).expect("read file"), SAMPLE);
 }
+
+#[test]
+fn ass_rounding_reports_how_many_timestamps_were_rounded() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.ass", ASS_SAMPLE);
+
+    // 505ms cannot be written: every timestamp gains 510ms of written value.
+    let output = run(&["shift", path_str(&file), "+505ms"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("Dialogue: 0,0:00:01.51,0:00:03.01,Default,,0,0,0,,Hello"),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(stderr(&output), "warning: 2 timestamps rounded to 10ms\n");
+}
+
+#[test]
+fn ass_an_offset_of_whole_centiseconds_prints_no_warning() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.ass", ASS_SAMPLE);
+
+    let output = run(&["shift", path_str(&file), "+500ms"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("Dialogue: 0,0:00:01.50,0:00:03.00,Default,,0,0,0,,Hello"),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(stderr(&output), "", "10ms needs no rounding");
+}
+
+#[test]
+fn ass_rounding_and_clamping_print_one_warning_each_clamping_first() {
+    let dir = TempDir::new();
+    let file = dir.write(
+        "early.ass",
+        "[Events]\nFormat: Layer, Start, End, Style, Text\n\
+         Dialogue: 0,0:00:00.50,0:00:05.00,Default,Early\n",
+    );
+
+    let output = run(&["shift", path_str(&file), "-1995ms"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("Dialogue: 0,0:00:00.00,0:00:03.01,Default,Early"),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(
+        stderr(&output),
+        "warning: 1 cue time clamped to 00:00:00,000\n\
+         warning: 1 timestamp rounded to 10ms\n"
+    );
+}
+
+#[test]
+fn srt_timestamps_stay_exact_when_ass_would_round() {
+    let dir = TempDir::new();
+    let file = dir.write("movie.srt", SAMPLE);
+
+    let output = run(&["shift", path_str(&file), "+505ms"]);
+
+    assert_eq!(code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("00:00:01,505 --> 00:00:03,005"),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(stderr(&output), "", "SubRip has no centisecond field");
+}
